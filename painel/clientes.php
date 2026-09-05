@@ -67,6 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'cadastr
             ':tel'   => $telSanitizado,
             ':senha' => password_hash($senha, PASSWORD_DEFAULT),
         ]);
+        registrarAuditoria($pdo, 'cliente', $novoId, 'criado', $nome);
 
         // Só manda o e-mail de "definir senha" quando tem e-mail E a senha
         // não foi definida na mão — senha manual já resolve tudo sozinha,

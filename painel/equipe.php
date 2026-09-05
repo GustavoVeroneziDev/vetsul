@@ -83,6 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'cadastr
             ':senha' => password_hash($senha, PASSWORD_DEFAULT),
             ':cargo' => $cargo !== '' ? $cargo : null,
         ]);
+        registrarAuditoria($pdo, 'funcionario', $novoId, 'criado', $nome);
 
         if ($email !== '' && $senhaManual === '') {
             $token = criarTokenResetSenha($pdo, $novoId);
@@ -156,6 +157,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'editar_
         }
         $sql .= ' WHERE IDUsuario=:id';
         $pdo->prepare($sql)->execute($params);
+        registrarAuditoria($pdo, 'funcionario', $idAlvo, 'editado', $novaSenha !== '' ? 'Dados e senha atualizados' : 'Dados atualizados');
 
         redirecionarComMensagem(BASE . '/painel/equipe.php', 'Membro atualizado com sucesso!', 'success');
     } catch (PDOException $e) {
@@ -193,6 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['acao'] ?? '', ['de
 
         $pdo->prepare('UPDATE Usuarios SET Ativo = :ativo WHERE IDUsuario = :id')
             ->execute([':ativo' => $ligar ? 1 : 0, ':id' => $idAlvo]);
+        registrarAuditoria($pdo, 'funcionario', $idAlvo, $ligar ? 'reativado' : 'excluido');
 
         redirecionarComMensagem(BASE . '/painel/equipe.php', $ligar ? 'Membro reativado com sucesso!' : 'Membro excluído — o login fica bloqueado, mas o histórico é mantido.', 'success');
     } catch (PDOException $e) {

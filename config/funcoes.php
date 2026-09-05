@@ -256,6 +256,28 @@ function montarMensagemRemarcacao(PDO $pdo, string $nomeCliente, string $nomeAni
 // isso, ações como remarcar sobrescrevem a data antiga sem deixar rastro
 // nenhum de quando ou pra onde foi trocado. FKUsuario fica null quando não
 // tem sessão ativa (ex: chamado de dentro de um cron).
+// Trilha de auditoria genérica pra cliente/animal/equipe — mesma ideia do
+// registrarEventoAgendamento() acima, mas não presa à Agenda. Sem isso,
+// editar/excluir/reativar alguém não deixava rastro de quem fez o quê.
+function registrarAuditoria(PDO $pdo, string $entidade, string $fkEntidade, string $acao, ?string $detalhes = null): void
+{
+    try {
+        $pdo->prepare(
+            'INSERT INTO LogAuditoria (IDLog, FKUsuario, Entidade, FKEntidade, Acao, Detalhes)
+             VALUES (:id, :usuario, :entidade, :fkentidade, :acao, :detalhes)'
+        )->execute([
+            ':id'         => gerarUuid(),
+            ':usuario'    => $_SESSION['usuario_id'] ?? null,
+            ':entidade'   => $entidade,
+            ':fkentidade' => $fkEntidade,
+            ':acao'       => $acao,
+            ':detalhes'   => $detalhes,
+        ]);
+    } catch (PDOException $e) {
+        error_log('[LogAuditoria] ' . $e->getMessage());
+    }
+}
+
 function registrarEventoAgendamento(PDO $pdo, string $fkAgendamento, string $tipo, ?string $detalhes = null): void
 {
     try {

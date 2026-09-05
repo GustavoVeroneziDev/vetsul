@@ -52,6 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $params[':foto'] = $foto;
             }
             $pdo->prepare($sql)->execute($params);
+            registrarAuditoria($pdo, 'animal', $id, 'editado');
             redirecionarComMensagem(BASE . '/painel/animal_detalhe.php?id=' . $id, 'Animal atualizado com sucesso!', 'success');
         } catch (PDOException $e) {
             error_log('[EditarAnimal] ' . $e->getMessage());
@@ -62,6 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'desativar') {
         try {
             desativarAnimal($pdo, $id);
+            registrarAuditoria($pdo, 'animal', $id, 'excluido');
             redirecionarComMensagem(BASE . '/painel/animal_detalhe.php?id=' . $id, 'Animal excluído — some das listas, mas o histórico fica guardado. Dá pra reativar quando quiser.', 'success');
         } catch (PDOException $e) {
             error_log('[DesativarAnimal] ' . $e->getMessage());
@@ -72,6 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'reativar') {
         try {
             $pdo->prepare('UPDATE Animais SET Ativo = 1 WHERE IDAnimal = :id')->execute([':id' => $id]);
+            registrarAuditoria($pdo, 'animal', $id, 'reativado');
             redirecionarComMensagem(BASE . '/painel/animal_detalhe.php?id=' . $id, 'Animal reativado com sucesso!', 'success');
         } catch (PDOException $e) {
             error_log('[ReativarAnimal] ' . $e->getMessage());

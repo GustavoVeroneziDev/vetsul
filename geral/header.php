@@ -357,12 +357,14 @@ $nivelAcesso  = $_SESSION['nivel_acesso'] ?? '';
                 ['href' => BASE . '/painel/agenda.php',       'icon' => 'bi-calendar3',     'label' => 'Agenda'],
                 ['href' => BASE . '/painel/animais.php',      'icon' => 'bi-clipboard2-pulse', 'label' => 'Animais'],
                 ['href' => BASE . '/painel/clientes.php',      'icon' => 'bi-people',        'label' => 'Clientes'],
+                ['href' => BASE . '/painel/relatorios.php',    'icon' => 'bi-bar-chart-line', 'label' => 'Relatórios'],
                 ['href' => BASE . '/painel/tipos_vacina.php',  'icon' => 'bi-shield-plus',   'label' => 'Tipos de Vacina'],
                 ['href' => BASE . '/painel/tipos_procedimento.php', 'icon' => 'bi-list-check', 'label' => 'Tipos de Procedimento'],
             ];
             // Equipe e Configurações: só o admin dono do sistema mexe nisso, não os veterinários
             if ($nivelAcesso === 'admin') {
                 $menuItens[] = ['href' => BASE . '/painel/equipe.php',        'icon' => 'bi-person-badge', 'label' => 'Equipe'];
+                $menuItens[] = ['href' => BASE . '/painel/auditoria.php',     'icon' => 'bi-clock-history', 'label' => 'Auditoria'];
                 $menuItens[] = ['href' => BASE . '/painel/configuracoes.php', 'icon' => 'bi-gear',         'label' => 'Configurações'];
             }
             ?>

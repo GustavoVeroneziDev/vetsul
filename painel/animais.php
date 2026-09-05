@@ -51,6 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'novo_an
             ':obs'  => $obs ?: null,
             ':foto' => $foto,
         ]);
+        registrarAuditoria($pdo, 'animal', $novoId, 'criado', $nome);
         redirecionarComMensagem(BASE . '/painel/animal_detalhe.php?id=' . $novoId, 'Animal cadastrado com sucesso!', 'success');
     } catch (PDOException $e) {
         error_log('[NovoAnimal] ' . $e->getMessage());

@@ -103,9 +103,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id      = trim($_POST['id'] ?? '');
         $obsPos  = trim($_POST['observacoes_pos'] ?? '');
         $criarRc = !empty($_POST['criar_clinico']);
+        $valorStr = trim($_POST['valor'] ?? '');
+        $pago     = !empty($_POST['pago']);
 
         if ($id === '') {
             redirecionarComMensagem(BASE . '/painel/agenda.php', 'Agendamento não encontrado.', 'warning');
+        }
+
+        // Vírgula ou ponto, tanto faz — o campo já vem mascarado tipo dinheiro
+        // (mesmo padrão de peso), mas aceita os dois formatos por segurança.
+        $valor = null;
+        if ($valorStr !== '') {
+            $valorNum = (float) str_replace(',', '.', $valorStr);
+            if ($valorNum > 0) {
+                $valor = $valorNum;
+            }
         }
 
         try {
@@ -154,8 +166,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $pdo->prepare(
-                "UPDATE Agendamentos SET Status = 'concluido', ObservacoesPos = :obs, FKRegistroClinico = :rc WHERE IDAgendamento = :id"
-            )->execute([':obs' => $obsPos ?: null, ':rc' => $fkRegistroClinico, ':id' => $id]);
+                "UPDATE Agendamentos SET Status = 'concluido', ObservacoesPos = :obs, FKRegistroClinico = :rc,
+                    Valor = :valor, StatusPagamento = :statuspag
+                 WHERE IDAgendamento = :id"
+            )->execute([
+                ':obs'       => $obsPos ?: null,
+                ':rc'        => $fkRegistroClinico,
+                ':valor'     => $valor,
+                ':statuspag' => $valor !== null ? ($pago ? 'pago' : 'pendente') : null,
+                ':id'        => $id,
+            ]);
             registrarEventoAgendamento($pdo, $id, 'concluido');
 
             // Se esse compromisso nasceu de uma vacina planejada (data futura
@@ -593,6 +613,13 @@ require_once __DIR__ . '/../geral/header.php';
                                             <span class="badge bg-secondary"><i class="bi bi-arrow-return-right"></i> Retorno</span>
                                         <?php endif ?>
                                         <?= labelStatusAgendamento($ag['Status']) ?>
+                                        <?php if ($ag['Valor'] !== null): ?>
+                                            <button type="button"
+                                                class="badge border-0 btn-alternar-pagamento bg-<?= $ag['StatusPagamento'] === 'pago' ? 'success' : 'warning' ?>"
+                                                data-id="<?= h($ag['IDAgendamento']) ?>" style="cursor:pointer;" title="Clique pra alternar pago/pendente">
+                                                R$ <?= number_format((float) $ag['Valor'], 2, ',', '.') ?> · <?= $ag['StatusPagamento'] === 'pago' ? 'Pago' : 'Pendente' ?>
+                                            </button>
+                                        <?php endif ?>
                                         <span class="fw-medium"><?= especieIconeHtml($ag['IconeEspecie']) ?> <?= h($ag['NomeAnimal']) ?></span>
                                         <span class="text-secondary small">— <?= h($ag['NomeDono']) ?></span>
                                     </div>
@@ -757,6 +784,22 @@ require_once __DIR__ . '/../geral/header.php';
                         <div class="col-7">
                             <label class="form-label small">Motivo do retorno</label>
                             <input type="text" name="retorno_titulo" id="concluirRetornoTitulo" class="form-control" placeholder="Ex: Retirada de pontos">
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-7">
+                            <label class="form-label">Valor cobrado <span class="text-secondary">(opcional)</span></label>
+                            <div class="input-group">
+                                <span class="input-group-text">R$</span>
+                                <input type="number" name="valor" id="concluirValor" class="form-control" step="0.01" min="0" placeholder="0,00">
+                            </div>
+                        </div>
+                        <div class="col-5">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" name="pago" id="concluirPago" value="1">
+                                <label class="form-check-label" for="concluirPago">Já foi pago</label>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -935,6 +978,8 @@ document.addEventListener('click', function (e) {
         document.getElementById('concluirRetornoCampos').style.display = 'none';
         document.getElementById('concluirRetornoDias').value = 10;
         document.getElementById('concluirRetornoTitulo').value = 'Retorno — ' + btnConcluir.dataset.titulo;
+        document.getElementById('concluirValor').value = '';
+        document.getElementById('concluirPago').checked = false;
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalConcluir')).show();
         return;
     }
@@ -951,6 +996,25 @@ document.addEventListener('click', function (e) {
         document.getElementById('remarcarData').value = btnRemarcar.dataset.data;
         document.getElementById('remarcarHora').value = btnRemarcar.dataset.hora;
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalRemarcar')).show();
+        return;
+    }
+
+    var btnPagamento = e.target.closest('.btn-alternar-pagamento');
+    if (btnPagamento) {
+        fetch(BASE + '/painel/api_agendamento.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ acao: 'alternar_pagamento', id: btnPagamento.dataset.id, csrf_token: '<?= gerarTokenCSRF() ?>' }),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (d.ok) {
+                vsRecarregarPreservandoScroll();
+            } else {
+                vsToast(d.msg || 'Erro ao atualizar.', 'danger');
+            }
+        })
+        .catch(function () { vsToast('Falha na conexão.', 'danger'); });
         return;
     }
 

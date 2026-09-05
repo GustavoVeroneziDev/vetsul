@@ -55,6 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'novo_an
             ':obs'  => $obs ?: null,
             ':foto' => $foto,
         ]);
+        registrarAuditoria($pdo, 'animal', $novoId, 'criado', $nome);
         redirecionarComMensagem(BASE . '/painel/animal_detalhe.php?id=' . $novoId, 'Animal cadastrado com sucesso!', 'success');
     } catch (PDOException $e) {
         error_log('[NovoAnimal] ' . $e->getMessage());
@@ -126,6 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'editar_
         }
         $sql .= ' WHERE IDUsuario = :id';
         $pdo->prepare($sql)->execute($params);
+        registrarAuditoria($pdo, 'cliente', $id, 'editado', $novaSenha !== '' ? 'Dados e senha atualizados' : 'Dados atualizados');
 
         redirecionarComMensagem(BASE . '/painel/cliente_detalhe.php?id=' . $id, 'Cliente atualizado com sucesso!', 'success');
     } catch (PDOException $e) {
@@ -145,6 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'excluir
     exigirAdmin(BASE . '/painel/cliente_detalhe.php?id=' . $id);
     try {
         desativarCliente($pdo, $id);
+        registrarAuditoria($pdo, 'cliente', $id, 'excluido');
         redirecionarComMensagem(BASE . '/painel/cliente_detalhe.php?id=' . $id, 'Cliente excluído — os animais dele também ficaram inativos. Dá pra reativar quando quiser.', 'success');
     } catch (PDOException $e) {
         error_log('[ExcluirCliente] ' . $e->getMessage());
@@ -159,6 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'reativa
     exigirAdmin(BASE . '/painel/cliente_detalhe.php?id=' . $id);
     try {
         $pdo->prepare('UPDATE Usuarios SET Ativo = 1 WHERE IDUsuario = :id')->execute([':id' => $id]);
+        registrarAuditoria($pdo, 'cliente', $id, 'reativado');
         redirecionarComMensagem(BASE . '/painel/cliente_detalhe.php?id=' . $id, 'Cliente reativado com sucesso!', 'success');
     } catch (PDOException $e) {
         error_log('[ReativarCliente] ' . $e->getMessage());

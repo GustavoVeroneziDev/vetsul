@@ -28,6 +28,28 @@ if (!validarTokenCSRF($dados['csrf_token'] ?? '')) {
 $acao = $dados['acao'] ?? '';
 $id   = trim($dados['id'] ?? '');
 
+// Alterna pago/pendente depois do agendamento já concluído — o pagamento
+// às vezes só acontece depois do atendimento em si.
+if ($acao === 'alternar_pagamento' && $id) {
+    try {
+        $stmt = $pdo->prepare('SELECT StatusPagamento FROM Agendamentos WHERE IDAgendamento = :id AND Valor IS NOT NULL LIMIT 1');
+        $stmt->execute([':id' => $id]);
+        $statusAtual = $stmt->fetchColumn();
+        if ($statusAtual === false) {
+            echo json_encode(['ok' => false, 'msg' => 'Esse agendamento não tem valor cobrado registrado.']);
+            exit;
+        }
+        $novoStatus = $statusAtual === 'pago' ? 'pendente' : 'pago';
+        $pdo->prepare('UPDATE Agendamentos SET StatusPagamento = :s WHERE IDAgendamento = :id')
+            ->execute([':s' => $novoStatus, ':id' => $id]);
+        echo json_encode(['ok' => true, 'status' => $novoStatus]);
+    } catch (PDOException $e) {
+        error_log('[ApiAgendamento] ' . $e->getMessage());
+        echo json_encode(['ok' => false, 'msg' => 'Erro ao atualizar pagamento.']);
+    }
+    exit;
+}
+
 $transicoes = [
     'confirmar'    => ['de' => ['pendente'],                         'para' => 'confirmado'],
     'cancelar'     => ['de' => ['pendente', 'confirmado'],           'para' => 'cancelado'],
