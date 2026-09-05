@@ -30,6 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'cadastr
     $email       = trim($_POST['email'] ?? '');
     $tel         = trim($_POST['tel']   ?? '');
     $cargo       = trim($_POST['cargo'] ?? '');
+    $crmv        = trim($_POST['crmv']  ?? '');
     $senhaManual = trim($_POST['senha'] ?? '');
 
     // WhatsApp é o dado essencial — e-mail vira opcional (mesma lógica do
@@ -53,6 +54,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'cadastr
     if ($cargo !== '' && !isset($cargos[$cargo])) {
         $cargo = '';
     }
+    // Identificação por nome + CRMV é exigência do CFMV pra quem assina
+    // prontuário — sem isso, quem aparece como "veterinário responsável"
+    // num registro clínico não tem como ser identificado de verdade.
+    if ($cargo === 'veterinario' && $crmv === '') {
+        redirecionarComMensagem(BASE . '/painel/equipe.php', 'CRMV é obrigatório para o cargo de veterinário.', 'warning');
+    }
 
     try {
         if ($email !== '') {
@@ -72,8 +79,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'cadastr
 
         $novoId = gerarUuid();
         $stmt = $pdo->prepare(
-            'INSERT INTO Usuarios (IDUsuario, Nome, Email, Telefone, Senha, NivelAcesso, Cargo)
-             VALUES (:id,:nome,:email,:tel,:senha,\'funcionario\',:cargo)'
+            'INSERT INTO Usuarios (IDUsuario, Nome, Email, Telefone, Senha, NivelAcesso, Cargo, CRMV)
+             VALUES (:id,:nome,:email,:tel,:senha,\'funcionario\',:cargo,:crmv)'
         );
         $stmt->execute([
             ':id'    => $novoId,
@@ -82,6 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'cadastr
             ':tel'   => $telSanitizado,
             ':senha' => password_hash($senha, PASSWORD_DEFAULT),
             ':cargo' => $cargo !== '' ? $cargo : null,
+            ':crmv'  => $cargo === 'veterinario' && $crmv !== '' ? $crmv : null,
         ]);
         registrarAuditoria($pdo, 'funcionario', $novoId, 'criado', $nome);
 
@@ -122,6 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'editar_
     $nome      = trim($_POST['nome'] ?? '');
     $tel       = trim($_POST['tel']  ?? '');
     $cargo     = trim($_POST['cargo'] ?? '');
+    $crmv      = trim($_POST['crmv'] ?? '');
     $novaSenha = $_POST['nova_senha'] ?? '';
 
     if ($idAlvo === '' || $nome === '') {
@@ -129,6 +138,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'editar_
     }
     if ($cargo !== '' && !isset($cargos[$cargo])) {
         $cargo = '';
+    }
+    if ($cargo === 'veterinario' && $crmv === '') {
+        redirecionarComMensagem(BASE . '/painel/equipe.php', 'CRMV é obrigatório para o cargo de veterinário.', 'warning');
     }
     if ($novaSenha !== '' && strlen($novaSenha) < 4) {
         redirecionarComMensagem(BASE . '/painel/equipe.php', 'A nova senha deve ter pelo menos 4 caracteres.', 'warning');
@@ -148,9 +160,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'editar_
             ':nome'  => $nome,
             ':tel'   => $tel !== '' ? sanitizarTelefone($tel) : null,
             ':cargo' => $cargo !== '' ? $cargo : null,
+            ':crmv'  => $cargo === 'veterinario' && $crmv !== '' ? $crmv : null,
             ':id'    => $idAlvo,
         ];
-        $sql = 'UPDATE Usuarios SET Nome=:nome, Telefone=:tel, Cargo=:cargo';
+        $sql = 'UPDATE Usuarios SET Nome=:nome, Telefone=:tel, Cargo=:cargo, CRMV=:crmv';
         if ($novaSenha !== '') {
             $sql .= ', Senha=:senha';
             $params[':senha'] = password_hash($novaSenha, PASSWORD_DEFAULT);
@@ -218,7 +231,7 @@ try {
     // atendem, ex: José/Dayvid como veterinário — sem cargo, um admin
     // "só de sistema" não precisa aparecer no quadro da equipe).
     $vets = $pdo->query(
-        "SELECT IDUsuario, Nome, Email, Telefone, Cargo, NivelAcesso, MomentoRegistro, Ativo
+        "SELECT IDUsuario, Nome, Email, Telefone, Cargo, CRMV, NivelAcesso, MomentoRegistro, Ativo
          FROM Usuarios
          WHERE {$statusCondicao}
            AND (NivelAcesso = 'funcionario' OR (NivelAcesso = 'admin' AND Cargo IS NOT NULL))
@@ -293,6 +306,11 @@ require_once __DIR__ . '/../geral/header.php';
                                 <td class="small">
                                     <?php if ($v['Cargo'] && isset($cargos[$v['Cargo']])): ?>
                                         <span class="badge" style="background:var(--accent-light);color:var(--accent);"><?= h($cargos[$v['Cargo']]) ?></span>
+                                        <?php if ($v['Cargo'] === 'veterinario'): ?>
+                                            <div class="text-secondary" style="font-size:.72rem;">
+                                                <?= $v['CRMV'] ? 'CRMV ' . h($v['CRMV']) : '⚠ sem CRMV' ?>
+                                            </div>
+                                        <?php endif ?>
                                     <?php else: ?>
                                         <span class="text-secondary">—</span>
                                     <?php endif ?>
@@ -384,6 +402,11 @@ require_once __DIR__ . '/../geral/header.php';
                         <?= campoPicker('funcCargo', 'cargo', 'Selecione…', '', obrigatorio: false, comBusca: false) ?>
                         <div class="form-text">Só usado pra mostrar esse funcionário como opção de "veterinário responsável" num agendamento — não muda o que ele pode fazer no sistema.</div>
                     </div>
+                    <div class="mb-3" id="funcCrmvWrap" style="display:none;">
+                        <label class="form-label">CRMV *</label>
+                        <input type="text" name="crmv" id="funcCrmv" class="form-control" placeholder="Ex: CRMV-SP 12345" maxlength="20">
+                        <div class="form-text">Exigido pelo CFMV pra identificar quem assina o prontuário.</div>
+                    </div>
                     <div class="mb-1">
                         <label class="form-label">Senha <span class="text-secondary">(opcional)</span></label>
                         <input type="password" name="senha" class="form-control" minlength="4" maxlength="72" autocomplete="new-password">
@@ -428,6 +451,10 @@ require_once __DIR__ . '/../geral/header.php';
                         <label class="form-label">Cargo</label>
                         <?= campoPicker('editCargo', 'cargo', 'Selecione…', '', obrigatorio: false, comBusca: false) ?>
                     </div>
+                    <div class="mb-3" id="editCrmvWrap" style="display:none;">
+                        <label class="form-label">CRMV *</label>
+                        <input type="text" name="crmv" id="editCrmv" class="form-control" placeholder="Ex: CRMV-SP 12345" maxlength="20">
+                    </div>
                     <div class="mb-1">
                         <label class="form-label">Nova senha</label>
                         <input type="password" name="nova_senha" id="editSenha" class="form-control" minlength="4" maxlength="72" autocomplete="new-password">
@@ -467,6 +494,14 @@ var CARGOS = <?= json_encode(array_map(fn($valor, $label) => [
     atualizar();
 })();
 
+// CRMV só faz sentido pra quem tem cargo "veterinário" — mostra o campo só
+// nesse caso, em vez de deixar sempre visível pra todo mundo.
+function alternarCrmvWrap(wrapId, campoId, cargoId) {
+    var mostrar = cargoId === 'veterinario';
+    document.getElementById(wrapId).style.display = mostrar ? '' : 'none';
+    if (!mostrar) document.getElementById(campoId).value = '';
+}
+
 initPicker({
     pickerId: 'funcCargoPicker', triggerId: 'funcCargoTrigger', dropdownId: 'funcCargoDropdown',
     searchId: 'funcCargoSearch', listId: 'funcCargoList', hiddenId: 'inpfuncCargoId', labelId: 'funcCargoLabel',
@@ -475,6 +510,7 @@ initPicker({
     renderItem: function (c) { return { title: c.nome }; },
     matches: function (c, q) { return c.nome.toLowerCase().indexOf(q) !== -1; },
     vazioMsg: 'Nada encontrado.',
+    onSelect: function (c) { alternarCrmvWrap('funcCrmvWrap', 'funcCrmv', c.id); },
 });
 
 <?php if ($souDev): ?>
@@ -486,6 +522,7 @@ var editCargoPk = initPicker({
     renderItem: function (c) { return { title: c.nome }; },
     matches: function (c, q) { return c.nome.toLowerCase().indexOf(q) !== -1; },
     vazioMsg: 'Nada encontrado.',
+    onSelect: function (c) { alternarCrmvWrap('editCrmvWrap', 'editCrmv', c.id); },
 });
 
 function abrirModalEditarMembro(dados) {
@@ -493,6 +530,8 @@ function abrirModalEditarMembro(dados) {
     document.getElementById('editId').value    = dados.IDUsuario;
     document.getElementById('editNome').value  = dados.Nome;
     document.getElementById('editSenha').value = '';
+    alternarCrmvWrap('editCrmvWrap', 'editCrmv', dados.Cargo);
+    document.getElementById('editCrmv').value  = dados.CRMV || '';
 
     // Telefone é salvo com "55" na frente (padrão de sanitizarTelefone()) —
     // tira isso antes de preencher, senão mostra sem máscara nenhuma; o

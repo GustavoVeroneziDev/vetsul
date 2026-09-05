@@ -28,27 +28,32 @@ if (!validarTokenCSRF($dados['csrf_token'] ?? '')) {
 $acao = $dados['acao'] ?? '';
 $id   = trim($dados['id'] ?? '');
 
+// "Excluir" um registro clínico é sempre desativação (Ativo=0), nunca
+// apagar de vez — prontuário é documento técnico-legal (CFMV) e um registro
+// criado errado precisa continuar rastreável, não virar lixo de informação
+// nem sumir sem deixar rastro. Mesmo padrão de cliente/animal/equipe.
 if ($acao === 'excluir' && $id) {
     try {
-        $anexos = $pdo->prepare('SELECT CaminhoArquivo FROM AnexosClinicos WHERE FKRegistro = :id');
-        $anexos->execute([':id' => $id]);
-        $caminhos = $anexos->fetchAll(PDO::FETCH_COLUMN);
-
-        // ON DELETE CASCADE cuida das linhas de AnexosClinicos; os arquivos
-        // físicos precisam ser apagados à parte, senão ficam órfãos no disco.
-        $pdo->prepare('DELETE FROM RegistrosClinicos WHERE IDRegistro = :id')->execute([':id' => $id]);
-
-        foreach ($caminhos as $caminho) {
-            $caminhoFisico = __DIR__ . '/..' . $caminho;
-            if (is_file($caminhoFisico)) {
-                @unlink($caminhoFisico);
-            }
-        }
+        $pdo->prepare('UPDATE RegistrosClinicos SET Ativo = 0 WHERE IDRegistro = :id')->execute([':id' => $id]);
+        registrarAuditoria($pdo, 'registro_clinico', $id, 'excluido');
 
         echo json_encode(['ok' => true]);
     } catch (PDOException $e) {
         error_log('[ApiClinico] ' . $e->getMessage());
         echo json_encode(['ok' => false, 'msg' => 'Erro ao excluir registro.']);
+    }
+    exit;
+}
+
+if ($acao === 'reativar' && $id) {
+    try {
+        $pdo->prepare('UPDATE RegistrosClinicos SET Ativo = 1 WHERE IDRegistro = :id')->execute([':id' => $id]);
+        registrarAuditoria($pdo, 'registro_clinico', $id, 'reativado');
+
+        echo json_encode(['ok' => true]);
+    } catch (PDOException $e) {
+        error_log('[ApiClinico] ' . $e->getMessage());
+        echo json_encode(['ok' => false, 'msg' => 'Erro ao reativar registro.']);
     }
     exit;
 }

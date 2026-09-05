@@ -53,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'error'    => $_FILES['imagens']['error'][$i] ?? UPLOAD_ERR_NO_FILE,
                 'size'     => $_FILES['imagens']['size'][$i] ?? 0,
             ];
-            $caminho = salvarImagemEnviada($arquivo, 'clinico');
+            $caminho = salvarImagemEnviada($arquivo, 'clinico', permitirPdf: true);
             if ($caminho !== null) {
                 $pdo->prepare(
                     'INSERT INTO AnexosClinicos (IDAnexo, FKRegistro, CaminhoArquivo, NomeOriginal)
@@ -172,9 +172,9 @@ require_once __DIR__ . '/../geral/header.php';
                 </div>
 
                 <div class="mb-4">
-                    <label class="form-label">Imagens <span class="text-secondary">(opcional)</span></label>
-                    <input type="file" name="imagens[]" class="form-control" accept="image/png,image/jpeg,image/webp" capture="environment" multiple>
-                    <div class="form-text">JPG, PNG ou WEBP — até 5 MB cada. No celular, dá pra tirar a foto na hora.</div>
+                    <label class="form-label">Imagens ou PDF <span class="text-secondary">(opcional)</span></label>
+                    <input type="file" name="imagens[]" class="form-control" accept="image/png,image/jpeg,image/webp,application/pdf" multiple>
+                    <div class="form-text">JPG, PNG, WEBP ou PDF (laudos, exames) — até 5 MB cada. No celular, dá pra tirar a foto na hora.</div>
                 </div>
 
                 <div class="d-grid">

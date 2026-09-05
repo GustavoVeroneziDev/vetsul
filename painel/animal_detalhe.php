@@ -109,11 +109,12 @@ try {
     $historico->execute([':id' => $id]);
     $historico = $historico->fetchAll();
 
+    $mostrarClinicoExcluidos = ($_GET['clinico'] ?? '') === 'todos';
     $clinico = $pdo->prepare(
         'SELECT rc.*, u.Nome AS NomeVeterinario
          FROM RegistrosClinicos rc
          LEFT JOIN Usuarios u ON u.IDUsuario = rc.FKVeterinario
-         WHERE rc.FKAnimal = :id
+         WHERE rc.FKAnimal = :id' . ($mostrarClinicoExcluidos ? '' : ' AND rc.Ativo = 1') . '
          ORDER BY rc.DataRegistro DESC, rc.MomentoRegistro DESC'
     );
     $clinico->execute([':id' => $id]);
@@ -368,10 +369,15 @@ require_once __DIR__ . '/../geral/header.php';
         </div>
 
         <div class="card mt-4">
-            <div class="card-header px-4 py-3">
-                <i class="bi bi-journal-medical me-2 text-accent"></i>Histórico clínico
+            <div class="card-header px-4 py-3 d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-journal-medical me-2 text-accent"></i>Histórico clínico</span>
+                <?php if ($souAdmin): ?>
+                    <a href="<?= BASE ?>/painel/animal_detalhe.php?id=<?= h($id) ?><?= $mostrarClinicoExcluidos ? '' : '&clinico=todos' ?>#historico-clinico" class="small">
+                        <?= $mostrarClinicoExcluidos ? 'Ocultar excluídos' : 'Mostrar excluídos' ?>
+                    </a>
+                <?php endif ?>
             </div>
-            <div class="card-body">
+            <div class="card-body" id="historico-clinico">
                 <?php if (empty($clinico)): ?>
                     <div class="text-center py-4 text-secondary">
                         <i class="bi bi-journal-medical fs-1 d-block mb-2 opacity-25"></i>
@@ -380,17 +386,24 @@ require_once __DIR__ . '/../geral/header.php';
                 <?php else: ?>
                     <div class="d-flex flex-column gap-3">
                         <?php foreach ($clinico as $reg): ?>
-                            <div class="border rounded-3 p-3" style="border-color:var(--card-border-color) !important;" data-id-clinico="<?= h($reg['IDRegistro']) ?>">
+                            <div class="border rounded-3 p-3<?= $reg['Ativo'] ? '' : ' opacity-75' ?>" style="border-color:var(--card-border-color) !important;" data-id-clinico="<?= h($reg['IDRegistro']) ?>">
                                 <div class="d-flex justify-content-between align-items-start gap-2 mb-1">
                                     <div>
                                         <span class="badge" style="background:var(--accent-light);color:var(--accent);"><?= h($tiposClinicoLabel[$reg['Tipo']] ?? $reg['Tipo']) ?></span>
+                                        <?php if (!$reg['Ativo']): ?><span class="badge bg-secondary">Excluído</span><?php endif ?>
                                         <span class="fw-medium ms-1"><?= h($reg['Titulo']) ?></span>
                                     </div>
-                                    <?php if ($souAdmin): ?>
+                                    <?php if ($souAdmin && $reg['Ativo']): ?>
                                         <button class="btn btn-sm btn-outline-danger btn-excluir-clinico"
                                             data-id="<?= h($reg['IDRegistro']) ?>"
-                                            data-confirm="Excluir este registro clínico?">
+                                            data-confirm="Excluir este registro clínico? Dá pra reativar depois em &quot;Mostrar excluídos&quot;.">
                                             <i class="bi bi-trash"></i>
+                                        </button>
+                                    <?php elseif ($souAdmin): ?>
+                                        <button class="btn btn-sm btn-outline-accent btn-reativar-clinico"
+                                            data-id="<?= h($reg['IDRegistro']) ?>"
+                                            data-confirm="Reativar este registro clínico?">
+                                            <i class="bi bi-arrow-counterclockwise"></i>
                                         </button>
                                     <?php endif ?>
                                 </div>
@@ -404,8 +417,16 @@ require_once __DIR__ . '/../geral/header.php';
                                     <div class="d-flex flex-wrap gap-2">
                                         <?php foreach ($reg['Anexos'] as $anexo): ?>
                                             <a href="<?= BASE ?><?= h($anexo['CaminhoArquivo']) ?>" target="_blank" rel="noopener">
-                                                <img src="<?= BASE ?><?= h($anexo['CaminhoArquivo']) ?>" alt="Anexo"
-                                                     style="width:72px;height:72px;object-fit:cover;border-radius:var(--radius-btn);border:1px solid var(--card-border-color);">
+                                                <?php if (str_ends_with(strtolower($anexo['CaminhoArquivo']), '.pdf')): ?>
+                                                    <span class="d-flex flex-column align-items-center justify-content-center text-secondary"
+                                                          style="width:72px;height:72px;border-radius:var(--radius-btn);border:1px solid var(--card-border-color);">
+                                                        <i class="bi bi-file-earmark-pdf fs-3 text-danger"></i>
+                                                        <span style="font-size:.65rem;">PDF</span>
+                                                    </span>
+                                                <?php else: ?>
+                                                    <img src="<?= BASE ?><?= h($anexo['CaminhoArquivo']) ?>" alt="Anexo"
+                                                         style="width:72px;height:72px;object-fit:cover;border-radius:var(--radius-btn);border:1px solid var(--card-border-color);">
+                                                <?php endif ?>
                                             </a>
                                         <?php endforeach ?>
                                     </div>
@@ -688,6 +709,30 @@ document.querySelectorAll('.btn-excluir-clinico').forEach(function (btn) {
                     vsToast('Registro excluído.', 'success');
                 } else {
                     vsToast(d.msg || 'Erro ao excluir.', 'danger');
+                }
+            })
+            .catch(function () { vsToast('Falha na conexão.', 'danger'); });
+        });
+    });
+});
+
+document.querySelectorAll('.btn-reativar-clinico').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        vsConfirm(btn.dataset.confirm, function () {
+            fetch(BASE + '/painel/api_clinico.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ acao: 'reativar', id: btn.dataset.id, csrf_token: '<?= gerarTokenCSRF() ?>' }),
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d.ok) {
+                    vsToast('Registro reativado.', 'success');
+                    location.reload();
+                } else {
+                    vsToast(d.msg || 'Erro ao reativar.', 'danger');
                 }
             })
             .catch(function () { vsToast('Falha na conexão.', 'danger'); });

@@ -150,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'error'    => $_FILES['imagens']['error'][$i] ?? UPLOAD_ERR_NO_FILE,
                         'size'     => $_FILES['imagens']['size'][$i] ?? 0,
                     ];
-                    $caminho = salvarImagemEnviada($arquivo, 'clinico');
+                    $caminho = salvarImagemEnviada($arquivo, 'clinico', permitirPdf: true);
                     if ($caminho !== null) {
                         $pdo->prepare(
                             'INSERT INTO AnexosClinicos (IDAnexo, FKRegistro, CaminhoArquivo, NomeOriginal)
@@ -766,8 +766,8 @@ require_once __DIR__ . '/../geral/header.php';
                         </label>
                     </div>
                     <div class="mb-1">
-                        <label class="form-label">Imagens <span class="text-secondary">(opcional, vai junto no registro clínico)</span></label>
-                        <input type="file" name="imagens[]" class="form-control" accept="image/png,image/jpeg,image/webp" capture="environment" multiple>
+                        <label class="form-label">Imagens ou PDF <span class="text-secondary">(opcional, vai junto no registro clínico)</span></label>
+                        <input type="file" name="imagens[]" class="form-control" accept="image/png,image/jpeg,image/webp,application/pdf" multiple>
                     </div>
                     <hr>
                     <div class="form-check mb-2">

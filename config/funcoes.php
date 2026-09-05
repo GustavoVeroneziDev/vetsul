@@ -13,7 +13,9 @@ function gerarUuid(): string
 // Valida, move e renomeia um upload de imagem (item de $_FILES) pra dentro de
 // uploads/{$subpasta}/. Retorna o caminho web (a partir da raiz do app, sem
 // BASE) ou null se não veio arquivo válido — quem chama decide se isso é erro.
-function salvarImagemEnviada(array $arquivo, string $subpasta): ?string
+// $permitirPdf só é usado nos anexos de registro clínico (laudo, exame em
+// PDF) — foto de perfil de animal/cliente continua só imagem.
+function salvarImagemEnviada(array $arquivo, string $subpasta, bool $permitirPdf = false): ?string
 {
     if (empty($arquivo['tmp_name']) || ($arquivo['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
         return null;
@@ -26,6 +28,9 @@ function salvarImagemEnviada(array $arquivo, string $subpasta): ?string
     }
 
     $permitidos = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+    if ($permitirPdf) {
+        $permitidos['application/pdf'] = 'pdf';
+    }
     $tipo = mime_content_type($arquivo['tmp_name']);
     if (!isset($permitidos[$tipo])) {
         return null;
