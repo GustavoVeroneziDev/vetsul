@@ -225,6 +225,21 @@ function montarMensagemRetorno(PDO $pdo, string $nomeCliente, string $nomeAnimal
     ]);
 }
 
+// Usada só quando um cadastro de vacina gera MAIS de um compromisso de
+// uma vez (ex: sequência manual com várias datas extras) — sem isso, cada
+// data virava um WhatsApp separado, um atrás do outro, pro mesmo cliente.
+function montarMensagemVariosRetornos(string $nomeCliente, string $nomeAnimal, string $nomeVacina, array $dataHoraLista): string
+{
+    $linhas = array_map(
+        fn(string $dh) => '📅 ' . formatarData($dh) . ' às ' . date('H:i', strtotime($dh)),
+        $dataHoraLista
+    );
+
+    return "Olá, {$nomeCliente}! Ficaram agendados os seguintes retornos de *{$nomeVacina}* para {$nomeAnimal}:\n"
+        . implode("\n", $linhas)
+        . "\n\nNão esqueça de chegar alguns minutos antes do horário, para uma melhor organização 😉 Muito obrigado!";
+}
+
 function montarMensagemCancelamento(PDO $pdo, string $nomeAnimal, string $tipo, string $titulo, string $dataHoraInicio): string
 {
     $tpl = getConfig($pdo, 'msg_cancelamento', '') ?: templatesWhatsAppPadrao()['msg_cancelamento'];
@@ -336,7 +351,11 @@ function desativarCliente(PDO $pdo, string $idCliente): void
 // já aconteceu). Compartilhado entre o cadastro de vacina e a edição manual
 // da próxima data, pra não duplicar essa lógica em dois lugares e correr o
 // risco de um WhatsApp sair diferente do outro.
-function criarAgendamentoVacina(PDO $pdo, string $fkAnimal, string $nomeVacina, ?string $fkVet, string $data, bool $retorno = false): string
+// $notificar=false deixa o WhatsApp por conta de quem chamou — usado
+// quando um único cadastro pode gerar vários compromissos de uma vez
+// (sequência manual), pra consolidar tudo numa mensagem só em vez de uma
+// por data (ver montarMensagemVariosRetornos()).
+function criarAgendamentoVacina(PDO $pdo, string $fkAnimal, string $nomeVacina, ?string $fkVet, string $data, bool $retorno = false, bool $notificar = true): string
 {
     $inicio = $data . ' 09:00:00';
     $fim    = date('Y-m-d H:i:s', strtotime($inicio) + 30 * 60);
@@ -352,14 +371,18 @@ function criarAgendamentoVacina(PDO $pdo, string $fkAnimal, string $nomeVacina, 
     ]);
     registrarEventoAgendamento($pdo, $agId, 'criado', 'Planejado a partir do registro de vacina.');
 
-    $donoStmt = $pdo->prepare(
-        'SELECT u.Nome AS NomeCliente, u.Telefone, a.Nome AS NomeAnimal FROM Animais a JOIN Usuarios u ON u.IDUsuario = a.FKDono WHERE a.IDAnimal = :id'
-    );
-    $donoStmt->execute([':id' => $fkAnimal]);
-    $dono = $donoStmt->fetch();
-    if ($dono && $dono['Telefone']) {
-        $msg = montarMensagemNovoAgendamento($pdo, $dono['NomeCliente'], $dono['NomeAnimal'], 'procedimento', $titulo, $inicio);
-        enviarWhatsApp(waNumero($dono['Telefone']), $msg);
+    if ($notificar) {
+        $donoStmt = $pdo->prepare(
+            'SELECT u.Nome AS NomeCliente, u.Telefone, a.Nome AS NomeAnimal FROM Animais a JOIN Usuarios u ON u.IDUsuario = a.FKDono WHERE a.IDAnimal = :id'
+        );
+        $donoStmt->execute([':id' => $fkAnimal]);
+        $dono = $donoStmt->fetch();
+        if ($dono && $dono['Telefone']) {
+            $msg = $retorno
+                ? montarMensagemRetorno($pdo, $dono['NomeCliente'], $dono['NomeAnimal'], 'procedimento', $titulo, $inicio)
+                : montarMensagemNovoAgendamento($pdo, $dono['NomeCliente'], $dono['NomeAnimal'], 'procedimento', $titulo, $inicio);
+            enviarWhatsApp(waNumero($dono['Telefone']), $msg);
+        }
     }
 
     return $agId;

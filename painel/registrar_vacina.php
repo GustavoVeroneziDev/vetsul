@@ -90,10 +90,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // se já aconteceu (ou é hoje), o que falta é o retorno da próxima
         // dose. Nunca os dois ao mesmo tempo — só existe um FKAgendamento
         // por registro, e só faz sentido lembrar do que ainda não passou.
+        //
+        // Cada compromisso é criado com notificar:false — um único cadastro
+        // pode gerar vários (sequência manual), e mandar um WhatsApp por
+        // data deixava o cliente recebendo várias mensagens seguidas pra
+        // um só atendimento. Uma mensagem consolidada é enviada no final.
+        $eventosCriados = [];
         if ($dataAp > date('Y-m-d')) {
-            $fkAgendamentoPrimario = criarAgendamentoVacina($pdo, $fkAnimal, $nomeVacina, $vet, $dataAp);
+            $fkAgendamentoPrimario = criarAgendamentoVacina($pdo, $fkAnimal, $nomeVacina, $vet, $dataAp, notificar: false);
+            $eventosCriados[] = ['inicio' => $dataAp . ' 09:00:00', 'retorno' => false];
         } elseif ($proximaData !== null) {
-            $fkAgendamentoPrimario = criarAgendamentoVacina($pdo, $fkAnimal, $nomeVacina, $vet, $proximaData, retorno: true);
+            $fkAgendamentoPrimario = criarAgendamentoVacina($pdo, $fkAnimal, $nomeVacina, $vet, $proximaData, retorno: true, notificar: false);
+            $eventosCriados[] = ['inicio' => $proximaData . ' 09:00:00', 'retorno' => true];
         } else {
             $fkAgendamentoPrimario = null;
         }
@@ -122,7 +130,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // na mão de uma vez em vez de depender do modo cíclico.
         if (!$ciclica) {
             foreach ($sequenciaExtra as $dataExtra) {
-                $fkAg = criarAgendamentoVacina($pdo, $fkAnimal, $nomeVacina, $vet, $dataExtra, retorno: true);
+                $fkAg = criarAgendamentoVacina($pdo, $fkAnimal, $nomeVacina, $vet, $dataExtra, retorno: true, notificar: false);
+                $eventosCriados[] = ['inicio' => $dataExtra . ' 09:00:00', 'retorno' => true];
                 $pdo->prepare(
                     'INSERT INTO RegistrosVacinas (IDRegistro, FKAnimal, FKTipoVacina, DataAplicacao, ProximaData, FKAgendamento, FKVeterinario, Observacoes)
                      VALUES (:id, :animal, :tipo, NULL, :proxima, :agendamento, :vet, :obs)'
@@ -135,6 +144,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':vet'     => $vet ?: null,
                     ':obs'     => 'Aplicação futura planejada manualmente.',
                 ]);
+            }
+        }
+
+        // Uma mensagem só pro cliente, mesmo quando o cadastro gerou vários
+        // compromissos — uma linha por data quando são vários, ou o mesmo
+        // texto de sempre quando é só um.
+        if ($eventosCriados) {
+            $donoStmt = $pdo->prepare(
+                'SELECT u.Nome AS NomeCliente, u.Telefone, a.Nome AS NomeAnimal FROM Animais a JOIN Usuarios u ON u.IDUsuario = a.FKDono WHERE a.IDAnimal = :id'
+            );
+            $donoStmt->execute([':id' => $fkAnimal]);
+            $dono = $donoStmt->fetch();
+            if ($dono && $dono['Telefone']) {
+                if (count($eventosCriados) === 1) {
+                    $ev     = $eventosCriados[0];
+                    $titulo = 'Vacina: ' . $nomeVacina . ($ev['retorno'] ? ' (retorno)' : '');
+                    $msg    = $ev['retorno']
+                        ? montarMensagemRetorno($pdo, $dono['NomeCliente'], $dono['NomeAnimal'], 'procedimento', $titulo, $ev['inicio'])
+                        : montarMensagemNovoAgendamento($pdo, $dono['NomeCliente'], $dono['NomeAnimal'], 'procedimento', $titulo, $ev['inicio']);
+                } else {
+                    $msg = montarMensagemVariosRetornos(
+                        $dono['NomeCliente'],
+                        $dono['NomeAnimal'],
+                        $nomeVacina,
+                        array_map(fn($ev) => $ev['inicio'], $eventosCriados)
+                    );
+                }
+                enviarWhatsApp(waNumero($dono['Telefone']), $msg);
             }
         }
 
