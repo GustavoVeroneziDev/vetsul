@@ -38,12 +38,7 @@ if ($acao === 'excluir' && $id) {
         $fkAgendamento = $vinculo->fetchColumn();
 
         $pdo->prepare('DELETE FROM RegistrosVacinas WHERE IDRegistro = :id')->execute([':id' => $id]);
-
-        if ($fkAgendamento) {
-            $pdo->prepare("UPDATE Agendamentos SET Status = 'cancelado' WHERE IDAgendamento = :ag AND Status NOT IN ('concluido', 'cancelado')")
-                ->execute([':ag' => $fkAgendamento]);
-            registrarEventoAgendamento($pdo, $fkAgendamento, 'cancelado', 'Vacina planejada removida do histórico do animal.');
-        }
+        cancelarAgendamentoVacina($pdo, $fkAgendamento ?: null);
 
         echo json_encode(['ok' => true]);
     } catch (PDOException $e) {
@@ -80,7 +75,12 @@ if ($acao === 'editar_proxima' && $id) {
     $ciclica = $ciclica && in_array($intervaloUnidade, $unidadesValidas, true);
 
     try {
-        $existe = $pdo->prepare('SELECT DataAplicacao FROM RegistrosVacinas WHERE IDRegistro = :id LIMIT 1');
+        $existe = $pdo->prepare(
+            'SELECT rv.DataAplicacao, rv.FKAnimal, rv.FKVeterinario, rv.FKAgendamento, tv.Nome AS NomeVacina
+             FROM RegistrosVacinas rv
+             JOIN TiposVacina tv ON tv.IDTipo = rv.FKTipoVacina
+             WHERE rv.IDRegistro = :id LIMIT 1'
+        );
         $existe->execute([':id' => $id]);
         $atual = $existe->fetch();
         if (!$atual) {
@@ -94,10 +94,18 @@ if ($acao === 'editar_proxima' && $id) {
             exit;
         }
 
+        // Troca o compromisso vinculado — cancela o antigo (a data mudou, o
+        // horário marcado antes não faz mais sentido) e cria um novo pra
+        // data nova, sempre como retorno (chegou até aqui, a aplicação
+        // original já é passado).
+        cancelarAgendamentoVacina($pdo, $atual['FKAgendamento']);
+        $novoAgendamento = criarAgendamentoVacina($pdo, $atual['FKAnimal'], $atual['NomeVacina'], $atual['FKVeterinario'], $proximaData, retorno: true);
+
         $pdo->prepare(
             "UPDATE RegistrosVacinas
              SET ProximaData = :proxima, Ciclica = :ciclica,
                  IntervaloCiclicoValor = :intvalor, IntervaloCiclicoUnidade = :intunidade,
+                 FKAgendamento = :agendamento,
                  NotificacaoSemanaEnviada = 0, NotificacaoDiaEnviada = 0
              WHERE IDRegistro = :id"
         )->execute([
@@ -105,6 +113,7 @@ if ($acao === 'editar_proxima' && $id) {
             ':ciclica'    => $ciclica ? 1 : 0,
             ':intvalor'   => $ciclica ? $intervaloValor : null,
             ':intunidade' => $ciclica ? $intervaloUnidade : null,
+            ':agendamento' => $novoAgendamento,
             ':id'         => $id,
         ]);
         echo json_encode(['ok' => true]);

@@ -57,38 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $tipoStmt->execute([':id' => $fkTipo]);
         $tipo = $tipoStmt->fetch();
 
-        // Uma vacina com data futura é um compromisso de verdade — sem
-        // aparecer na Agenda, o vet não tinha como lembrar de atender
-        // naquele dia (só quem olhasse a carteirinha do animal saberia).
-        // Reaproveita o mesmo padrão de "novo agendamento": evento +
-        // WhatsApp pro cliente.
-        $criarAgendamentoVacina = function (string $data) use ($pdo, $fkAnimal, $tipo, $vet) {
-            $inicio = $data . ' 09:00:00';
-            $fim    = date('Y-m-d H:i:s', strtotime($inicio) + 30 * 60);
-            $agId   = gerarUuid();
-            $titulo = 'Vacina: ' . ($tipo['Nome'] ?? 'aplicação');
-
-            $pdo->prepare(
-                'INSERT INTO Agendamentos (IDAgendamento, FKAnimal, FKVeterinario, Tipo, Titulo, DataHoraInicio, DataHoraFim)
-                 VALUES (:id, :animal, :vet, :tipo, :titulo, :inicio, :fim)'
-            )->execute([
-                ':id' => $agId, ':animal' => $fkAnimal, ':vet' => $vet ?: null,
-                ':tipo' => 'procedimento', ':titulo' => $titulo, ':inicio' => $inicio, ':fim' => $fim,
-            ]);
-            registrarEventoAgendamento($pdo, $agId, 'criado', 'Planejado a partir do registro de vacina.');
-
-            $donoStmt = $pdo->prepare(
-                'SELECT u.Nome AS NomeCliente, u.Telefone, a.Nome AS NomeAnimal FROM Animais a JOIN Usuarios u ON u.IDUsuario = a.FKDono WHERE a.IDAnimal = :id'
-            );
-            $donoStmt->execute([':id' => $fkAnimal]);
-            $dono = $donoStmt->fetch();
-            if ($dono && $dono['Telefone']) {
-                $msg = montarMensagemNovoAgendamento($pdo, $dono['NomeCliente'], $dono['NomeAnimal'], 'procedimento', $titulo, $inicio);
-                enviarWhatsApp(waNumero($dono['Telefone']), $msg);
-            }
-
-            return $agId;
-        };
+        $nomeVacina = $tipo['Nome'] ?? 'aplicação';
 
         // Cíclica não depende mais do intervalo do catálogo — a pessoa
         // escolhe livremente "a cada X semanas/meses/anos" na hora.
@@ -116,10 +85,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // Só entra na Agenda quando a aplicação em si ainda não aconteceu —
-        // uma data de hoje/passado é um registro histórico normal, não um
-        // compromisso a lembrar.
-        $fkAgendamentoPrimario = $dataAp > date('Y-m-d') ? $criarAgendamentoVacina($dataAp) : null;
+        // O "próximo evento" desse registro sempre vira um compromisso na
+        // Agenda — se a aplicação em si ainda não aconteceu, é ela mesma;
+        // se já aconteceu (ou é hoje), o que falta é o retorno da próxima
+        // dose. Nunca os dois ao mesmo tempo — só existe um FKAgendamento
+        // por registro, e só faz sentido lembrar do que ainda não passou.
+        if ($dataAp > date('Y-m-d')) {
+            $fkAgendamentoPrimario = criarAgendamentoVacina($pdo, $fkAnimal, $nomeVacina, $vet, $dataAp);
+        } elseif ($proximaData !== null) {
+            $fkAgendamentoPrimario = criarAgendamentoVacina($pdo, $fkAnimal, $nomeVacina, $vet, $proximaData, retorno: true);
+        } else {
+            $fkAgendamentoPrimario = null;
+        }
 
         $pdo->prepare(
             'INSERT INTO RegistrosVacinas (IDRegistro, FKAnimal, FKTipoVacina, DataAplicacao, ProximaData, Ciclica, IntervaloCiclicoValor, IntervaloCiclicoUnidade, FKAgendamento, FKVeterinario, Lote, Observacoes)
@@ -145,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // na mão de uma vez em vez de depender do modo cíclico.
         if (!$ciclica) {
             foreach ($sequenciaExtra as $dataExtra) {
-                $fkAg = $criarAgendamentoVacina($dataExtra);
+                $fkAg = criarAgendamentoVacina($pdo, $fkAnimal, $nomeVacina, $vet, $dataExtra, retorno: true);
                 $pdo->prepare(
                     'INSERT INTO RegistrosVacinas (IDRegistro, FKAnimal, FKTipoVacina, DataAplicacao, ProximaData, FKAgendamento, FKVeterinario, Observacoes)
                      VALUES (:id, :animal, :tipo, NULL, :proxima, :agendamento, :vet, :obs)'

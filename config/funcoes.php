@@ -331,6 +331,53 @@ function desativarCliente(PDO $pdo, string $idCliente): void
     }
 }
 
+// Cria o compromisso na Agenda pro "próximo evento" de uma vacina — a
+// aplicação em si (se ainda não aconteceu) ou o retorno da próxima dose (se
+// já aconteceu). Compartilhado entre o cadastro de vacina e a edição manual
+// da próxima data, pra não duplicar essa lógica em dois lugares e correr o
+// risco de um WhatsApp sair diferente do outro.
+function criarAgendamentoVacina(PDO $pdo, string $fkAnimal, string $nomeVacina, ?string $fkVet, string $data, bool $retorno = false): string
+{
+    $inicio = $data . ' 09:00:00';
+    $fim    = date('Y-m-d H:i:s', strtotime($inicio) + 30 * 60);
+    $agId   = gerarUuid();
+    $titulo = 'Vacina: ' . $nomeVacina . ($retorno ? ' (retorno)' : '');
+
+    $pdo->prepare(
+        'INSERT INTO Agendamentos (IDAgendamento, FKAnimal, FKVeterinario, Tipo, Titulo, DataHoraInicio, DataHoraFim)
+         VALUES (:id, :animal, :vet, :tipo, :titulo, :inicio, :fim)'
+    )->execute([
+        ':id' => $agId, ':animal' => $fkAnimal, ':vet' => $fkVet ?: null,
+        ':tipo' => 'procedimento', ':titulo' => $titulo, ':inicio' => $inicio, ':fim' => $fim,
+    ]);
+    registrarEventoAgendamento($pdo, $agId, 'criado', 'Planejado a partir do registro de vacina.');
+
+    $donoStmt = $pdo->prepare(
+        'SELECT u.Nome AS NomeCliente, u.Telefone, a.Nome AS NomeAnimal FROM Animais a JOIN Usuarios u ON u.IDUsuario = a.FKDono WHERE a.IDAnimal = :id'
+    );
+    $donoStmt->execute([':id' => $fkAnimal]);
+    $dono = $donoStmt->fetch();
+    if ($dono && $dono['Telefone']) {
+        $msg = montarMensagemNovoAgendamento($pdo, $dono['NomeCliente'], $dono['NomeAnimal'], 'procedimento', $titulo, $inicio);
+        enviarWhatsApp(waNumero($dono['Telefone']), $msg);
+    }
+
+    return $agId;
+}
+
+// Cancela o compromisso vinculado a uma vacina (se existir e ainda estiver
+// aberto) — usado antes de trocar a próxima data ou ao excluir o registro,
+// pra não deixar "Vacina: X" órfão sobrando na Agenda.
+function cancelarAgendamentoVacina(PDO $pdo, ?string $fkAgendamento): void
+{
+    if (!$fkAgendamento) {
+        return;
+    }
+    $pdo->prepare("UPDATE Agendamentos SET Status = 'cancelado' WHERE IDAgendamento = :ag AND Status NOT IN ('concluido', 'cancelado')")
+        ->execute([':ag' => $fkAgendamento]);
+    registrarEventoAgendamento($pdo, $fkAgendamento, 'cancelado', 'Vacina replanejada ou removida.');
+}
+
 function redirecionarComMensagem(string $url, string $msg, string $tipo): never
 {
     if (session_status() === PHP_SESSION_NONE) {
